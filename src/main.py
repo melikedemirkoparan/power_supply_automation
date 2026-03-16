@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import time
 
 from .enums import SupplyCommand
 from .supply_config import load_supply_profiles
@@ -157,15 +158,16 @@ def run_profile_b(pipeline: SupplyPipeline, args: argparse.Namespace) -> None:
     aktif_kanal = "P6V"
     
     while True:
-        print(f"\n====== E3631A Kontrol Menüsü | Kullanılan Kanal: {aktif_kanal} ======")
-        print("[1] Kanal seç        (P6V / P25V / N25V)")
-        print("[2] Voltaj ayarla    (VOLT)")
-        print("[3] Akım limiti ayarla (OCP)")
-        print("[4] Çıkışı aç       (OUTP ON)")
-        print("[5] Çıkışı kapat    (OUTP OFF)")
-        print("[6] Ölçüm yap       (MEAS:VOLT? + MEAS:CURR?)")
-        print("[7] Hata kontrol     (SYST:ERR?)")
-        print("[8] Reset            (*RST)")
+        kilit_durum = "Kilitli" if panel_kilitli else "Açık"
+        print(f"\n====== E3631A Kontrol Menüsü | Kanal: {aktif_kanal} | Ön Panel: {kilit_durum} ======")
+        print("[1] Kanal seç           (P6V / P25V / N25V)")
+        print("[2] Voltaj ayarla       (VOLT)")
+        print("[3] Akım limiti ayarla  (OCP)")
+        print("[4] Çıkışı aç           (OUTP ON)")
+        print("[5] Çıkışı kapat        (OUTP OFF)")
+        print("[6] Ölçüm yap           (MEAS:VOLT? + MEAS:CURR?)")
+        print("[7] Hata kontrol        (SYST:ERR?)")
+        print("[8] Reset               (*RST)")
         print("[0] Çıkış")
         print("===================================")
 
@@ -230,6 +232,7 @@ def run_profile_b(pipeline: SupplyPipeline, args: argparse.Namespace) -> None:
             # Sayfa 77 - OUTP ON: Üç çıkışı birden aktif eder.
             pipeline.execute(SupplyCommand.OPEN_OUTPUT, expect_response=False)
             print("  Çıkış açıldı (OUTP ON).")
+            time.sleep(0.5)  # Çıkış stabilize olana kadar bekle
             v = pipeline.execute(SupplyCommand.MEASURE_VOLTAGE, expect_response=True)
             c = pipeline.execute(SupplyCommand.MEASURE_CURRENT, expect_response=True)
             print(f"  Ölçüm -> Voltaj: {v} V, Akım: {c} A")
@@ -247,10 +250,20 @@ def run_profile_b(pipeline: SupplyPipeline, args: argparse.Namespace) -> None:
             print(f"  Ölçüm -> Voltaj: {v} V, Akım: {c} A")
 
         elif secim == "7":
-            # Sayfa 82 - SYST:ERR?: Hata kuyruğundaki son hatayı döner.
-            # Hata yoksa "+0, No error" döner.
-            err = pipeline.execute(SupplyCommand.SYSTEM_ERROR, expect_response=True)
-            print(f"  Hata durumu: {err}")
+            # Sayfa 82 - SYST:ERR?: Hata kuyruğundaki hatayı döner (FIFO).
+            # Her sorgu bir hata çeker. "+0, No error" gelene kadar döngüyle okunur.
+            print("  Hata kuyruğu okunuyor...")
+            hata_sayisi = 0
+            while True:
+                err = pipeline.execute(SupplyCommand.SYSTEM_ERROR, expect_response=True)
+                if err is None or "+0" in str(err):
+                    break
+                hata_sayisi += 1
+                print(f"  [{hata_sayisi}] {err}")
+            if hata_sayisi == 0:
+                print("  Hata yok.")
+            else:
+                print(f"  Toplam {hata_sayisi} hata okundu, kuyruk temizlendi.")
 
         elif secim == "8":
               # Sayfa 82 - *RST: Cihazı fabrika varsayılanlarına sıfırlar.
