@@ -29,6 +29,12 @@ class SupplyCommand(Enum):
     OVP_DISABLE = auto()
     OVP_CLEAR = auto()
 
+    # OCP controls (Over Current Protection)
+    OCP_SET = auto()
+    OCP_ENABLE = auto()
+    OCP_DISABLE = auto()
+    OCP_CLEAR = auto()
+
     # Multi-rail selection (E3631A-style)
     SELECT_P6V = auto()
     SELECT_P25V = auto()
@@ -37,5 +43,14 @@ class SupplyCommand(Enum):
     # Convenience command (some supplies support APPLY)
     APPLY = auto()
 
+# Hata sorgusu (E3631A User's Guide, Sayfa 82)
+      # SYST:ERR? hata kuyruğundaki son hatayı döner.
+      # Hata yoksa "+0, No error" döner.
+    SYSTEM_ERROR = auto()
+
+ # Komut tamamlanma kontrolü (E3631A User's Guide, Sayfa 97)
+    # *OPC? tüm bekleyen işlemler bittiyse 1 döner.
+    OPC_QUERY = auto()
+    
     # Test hook
     ECHO_TEST = auto()
