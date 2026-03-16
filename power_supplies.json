@@ -1,6 +1,53 @@
 {
-  "default": "A",
+  "default": "B",
   "supplies": {
+     "B": {
+      "driver": "map",
+      "description": "Keysight/Agilent E3631A Triple Output DC Supply over RS-232 (9600 8N2, SCPI)",
+      "serial": {
+        "baudrate": 9600,
+        "bytesize": 8,
+        "parity": "N",
+        "stopbits": 2,
+        "timeout_s": 2,
+        "write_timeout_s": 2,
+        "newline": "\r\n"
+      },
+      "command_map": {
+        "IDN": "*IDN?",
+        "RESET": "*RST",
+
+        "SYSTEM_REMOTE": "SYST:REM",
+        "SYSTEM_LOCAL": "SYST:LOC",
+        "SYSTEM_RWLOCK": "SYST:RWL",
+
+        "OPEN_OUTPUT": "OUTP ON",
+        "CLOSE_OUTPUT": "OUTP OFF",
+
+        "SELECT_P6V": "INST:SEL P6V",
+        "SELECT_P25V": "INST:SEL P25V",
+        "SELECT_N25V": "INST:SEL N25V",
+
+        "SET_VOLTAGE": "VOLT {value}",
+        "SET_CURRENT": "CURR {value}",
+
+        "MEASURE_VOLTAGE": "MEAS:VOLT?",
+        "MEASURE_CURRENT": "MEAS:CURR?",
+        "SYSTEM_ERROR": "SYST:ERR?",
+
+        "OCP_SET": "CURR:PROT {value}",
+        "OCP_ENABLE": "CURR:PROT:STAT ON",
+        "OCP_DISABLE": "CURR:PROT:STAT OFF",
+        "OCP_CLEAR": "CURR:PROT:CLE"
+      },
+      "expect_response": [
+        "IDN",
+        "MEASURE_VOLTAGE",
+        "MEASURE_CURRENT",
+        "SYSTEM_ERROR",
+        "OPC_QUERY"
+      ]
+    },
     "A": {
       "driver": "map",
       "description": "Keysight/Agilent E3645A (E364xA series) over RS-232 using SCPI",
@@ -41,47 +88,9 @@
       "expect_response": [
         "IDN",
         "MEASURE_VOLTAGE",
-        "MEASURE_CURRENT"
-      ]
-    },
-
-    "B": {
-      "driver": "map",
-      "description": "Keysight/Agilent E3631A Triple Output DC Supply over RS-232 (9600 8N2, SCPI)",
-      "serial": {
-        "baudrate": 9600,
-        "bytesize": 8,
-        "parity": "N",
-        "stopbits": 2,
-        "timeout_s": 2,
-        "write_timeout_s": 2,
-        "newline": "\r\n"
-      },
-      "command_map": {
-        "IDN": "*IDN?",
-        "RESET": "*RST",
-
-        "SYSTEM_REMOTE": "SYST:REM",
-        "SYSTEM_LOCAL": "SYST:LOC",
-        "SYSTEM_RWLOCK": "SYST:RWL",
-
-        "OPEN_OUTPUT": "OUTP ON",
-        "CLOSE_OUTPUT": "OUTP OFF",
-
-        "SELECT_P6V": "INST:SEL P6V",
-        "SELECT_P25V": "INST:SEL P25V",
-        "SELECT_N25V": "INST:SEL N25V",
-
-        "SET_VOLTAGE": "VOLT {value}",
-        "SET_CURRENT": "CURR {value}",
-
-        "MEASURE_VOLTAGE": "MEAS:VOLT?",
-        "MEASURE_CURRENT": "MEAS:CURR?"
-      },
-      "expect_response": [
-        "IDN",
-        "MEASURE_VOLTAGE",
-        "MEASURE_CURRENT"
+        "MEASURE_CURRENT",
+        "SYSTEM_ERROR",
+        "OPC_QUERY" 
       ]
     }
   }

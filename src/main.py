@@ -78,47 +78,202 @@ def run_profile_a(pipeline: SupplyPipeline, args: argparse.Namespace) -> None:
     pipeline.execute(SupplyCommand.SYSTEM_LOCAL, expect_response=False)
 
 
+# def run_profile_b(pipeline: SupplyPipeline, args: argparse.Namespace) -> None:
+#     # ---- GOLDEN PATH (B / E3631A) ----
+#     pipeline.execute(SupplyCommand.SYSTEM_REMOTE, expect_response=True)
+#
+#     if args.lock_remote:
+#         # B profile may or may not support RWLOCK; config decides.
+#         pipeline.execute(SupplyCommand.SYSTEM_RWLOCK, expect_response=True)
+#
+#     pipeline.execute(SupplyCommand.IDN, expect_response=True)
+#
+#     if not args.skip_reset:
+#         pipeline.execute(SupplyCommand.RESET, expect_response=True)
+#
+#     pipeline.execute(SupplyCommand.CLOSE_OUTPUT, expect_response=True)
+#
+#     # Rail selection is mandatory for E3631A-like supplies
+#     if args.rail == "P6V":
+#         pipeline.execute(SupplyCommand.SELECT_P6V, expect_response=True)
+#     elif args.rail == "P25V":
+#         pipeline.execute(SupplyCommand.SELECT_P25V, expect_response=True)
+#     else:
+#         pipeline.execute(SupplyCommand.SELECT_N25V, expect_response=True)
+#
+#     # Setpoints
+#     if args.use_apply:
+#         pipeline.execute(SupplyCommand.APPLY, value=None, expect_response=True)
+#     else:
+#         pipeline.execute(SupplyCommand.SET_VOLTAGE, value=args.volt, expect_response=True)
+#         pipeline.execute(SupplyCommand.SET_CURRENT, value=args.curr, expect_response=True)
+#
+#     pipeline.execute(SupplyCommand.OPEN_OUTPUT, expect_response=True)
+#     pipeline.execute(SupplyCommand.MEASURE_VOLTAGE, expect_response=True)
+#     pipeline.execute(SupplyCommand.MEASURE_CURRENT, expect_response=True)
+#     pipeline.execute(SupplyCommand.CLOSE_OUTPUT, expect_response=True)
+#     pipeline.execute(SupplyCommand.SYSTEM_LOCAL, expect_response=True)
+
+
 def run_profile_b(pipeline: SupplyPipeline, args: argparse.Namespace) -> None:
-    # ---- GOLDEN PATH (B / E3631A) ----
-    pipeline.execute(SupplyCommand.SYSTEM_REMOTE, expect_response=True)
+    # ===============================================================
+    # E3631A İnteraktif Kontrol Akışı
+    # Referans: Agilent E3631A User's Guide (E3631-90002)
+    # ===============================================================
 
-    if args.lock_remote:
-        # B profile may or may not support RWLOCK; config decides.
-        pipeline.execute(SupplyCommand.SYSTEM_RWLOCK, expect_response=True)
+    # ---- STARTUP (otomatik) ----
 
-    pipeline.execute(SupplyCommand.IDN, expect_response=True)
+    # Sayfa 87 - SYST:REM: Cihazı RS-232 remote moduna alır.
+    # Remote modda cihaz sadece seri port komutlarını kabul eder.
+    pipeline.execute(SupplyCommand.SYSTEM_REMOTE, expect_response=False)
 
-    if not args.skip_reset:
-        pipeline.execute(SupplyCommand.RESET, expect_response=True)
+    # Sayfa 82 - *IDN?: Cihaz kimlik bilgisini döner.
+    # Bağlantının doğru kurulduğunu teyit etmek için kullanılır.
+    resp = pipeline.execute(SupplyCommand.IDN, expect_response=True)
+    print(f"\nBağlı cihaz: {resp}")
 
-    pipeline.execute(SupplyCommand.CLOSE_OUTPUT, expect_response=True)
+    # Sayfa 82 - *RST: Cihazı fabrika varsayılanlarına sıfırlar.
+    # Tüm çıkışlar 0V, akım limitleri default, output OFF, tracking OFF.
+    pipeline.execute(SupplyCommand.RESET, expect_response=False)
+    print("Cihaz sıfırlandı (*RST).")
 
-    # Rail selection is mandatory for E3631A-like supplies
-    if args.rail == "P6V":
-        pipeline.execute(SupplyCommand.SELECT_P6V, expect_response=True)
-    elif args.rail == "P25V":
-        pipeline.execute(SupplyCommand.SELECT_P25V, expect_response=True)
-    else:
-        pipeline.execute(SupplyCommand.SELECT_N25V, expect_response=True)
+    # RST sonrası *IDN? tekrar sorgulanır — bazı cihazlarda RST öncesi IDN hata verebilir.
+    resp = pipeline.execute(SupplyCommand.IDN, expect_response=True)
+    print(f"Bağlı cihaz (RST sonrası): {resp}")
 
-    # Setpoints
-    if args.use_apply:
-        # APPLY template depends on mapping; keep as optional
-        # If your mapping is "APPL {voltage},{current}" you should implement that via config placeholders
-        # For now, use separate commands unless you update driver to support named placeholders.
-        pipeline.execute(SupplyCommand.APPLY, value=None, expect_response=True)
-    else:
-        pipeline.execute(SupplyCommand.SET_VOLTAGE, value=args.volt, expect_response=True)
-        pipeline.execute(SupplyCommand.SET_CURRENT, value=args.curr, expect_response=True)
+    # Sayfa 87 - SYST:RWL: Ön panel tuşlarını kilitler.
+    # Kullanıcı cihaz üzerinden müdahale edemez, sadece remote komutlar çalışır.
+    panel_kilitli = False
+    lock = input("\nÖn paneli kilitlemek ister misiniz? (E/H): ").strip().upper()
+    if lock == "E":
+        pipeline.execute(SupplyCommand.SYSTEM_RWLOCK, expect_response=False)
+        panel_kilitli = True
+        print("Panel kilitlendi (SYST:RWL).")
 
-    pipeline.execute(SupplyCommand.OPEN_OUTPUT, expect_response=True)
+    # ---- İNTERAKTİF MENÜ ----
+    # Sayfa 70-74 - Simplified Programming Overview:
+    # Önce INST:SEL ile kanal seçilir, sonra VOLT/CURR ile değerler ayarlanır,
+    # OUTP ON ile çıkış açılır, MEAS ile ölçüm yapılır.
+    aktif_kanal = "P6V"
+    
+    while True:
+        print(f"\n====== E3631A Kontrol Menüsü | Kullanılan Kanal: {aktif_kanal} ======")
+        print("[1] Kanal seç        (P6V / P25V / N25V)")
+        print("[2] Voltaj ayarla    (VOLT)")
+        print("[3] Akım limiti ayarla (OCP)")
+        print("[4] Çıkışı aç       (OUTP ON)")
+        print("[5] Çıkışı kapat    (OUTP OFF)")
+        print("[6] Ölçüm yap       (MEAS:VOLT? + MEAS:CURR?)")
+        print("[7] Hata kontrol     (SYST:ERR?)")
+        print("[8] Reset            (*RST)")
+        print("[0] Çıkış")
+        print("===================================")
 
-    pipeline.execute(SupplyCommand.MEASURE_VOLTAGE, expect_response=True)
+        secim = input("Seçiminiz: ").strip()
 
-    pipeline.execute(SupplyCommand.MEASURE_CURRENT, expect_response=True)
+        if secim == "1":
+            # Sayfa 74 - INST:SEL {P6V|P25V|N25V}:
+            # Programlanacak çıkışı seçer. VOLT/CURR komutları seçili kanala uygulanır.
+            # P6V=Kanal1 (0-6.18V, 0-5.15A), P25V=Kanal2 (0-25.75V, 0-1.03A),
+            # N25V=Kanal3 (0 ile -25.75V, 0-1.03A)  [Sayfa 72, Table 4-1]
+            print("  [1] P6V  (+6V,  max 5.15A)")
+            print("  [2] P25V (+25V, max 1.03A)")
+            print("  [3] N25V (-25V, max 1.03A)")
+            kanal = input("  Kanal: ").strip()
+            if kanal == "1":
+                pipeline.execute(SupplyCommand.SELECT_P6V, expect_response=False)
+                aktif_kanal = "P6V"
+                print("  Kanal: P6V seçildi.")
+            elif kanal == "2":
+                pipeline.execute(SupplyCommand.SELECT_P25V, expect_response=False)
+                aktif_kanal = "P25V"
+                print("  Kanal: P25V seçildi.")
+            elif kanal == "3":
+                pipeline.execute(SupplyCommand.SELECT_N25V, expect_response=False)
+                aktif_kanal = "N25V"
+                print("  Kanal: N25V seçildi.")
+            else:
+                print("  Geçersiz seçim.")
 
-    pipeline.execute(SupplyCommand.CLOSE_OUTPUT, expect_response=True)
-    pipeline.execute(SupplyCommand.SYSTEM_LOCAL, expect_response=True)
+        elif secim == "2":
+            # Sayfa 78 - VOLT {value}: Seçili kanalın voltaj limitini ayarlar.
+            # Değer kanalın aralığında olmalı (Table 4-1).
+            try:
+                volt = float(input("  Voltaj (V): ").strip())
+                pipeline.execute(SupplyCommand.SET_VOLTAGE, value=volt, expect_response=False)
+                print(f"  Voltaj {volt}V olarak ayarlandı.")
+            except ValueError:
+                print("  Geçersiz değer.")
+
+        elif secim == "3":
+            # Sayfa 80 - CURR:PROT {value}: OCP seviyesini ayarlar.
+            # CURR:PROT:STAT ON/OFF ile OCP aktif/pasif edilir.
+            print("  OCP: Belirlenen akım sınırı aşılırsa çıkışı otomatik kapatır.")
+            print("  [1] OCP sınır değeri ayarla ve aktif et")
+            print("  [2] OCP kapat")
+            ocp_secim = input("  Seçiminiz: ").strip()
+            if ocp_secim == "1":
+                try:
+                    ocp = float(input("  OCP akım limiti (A): ").strip())
+                    pipeline.execute(SupplyCommand.OCP_SET, value=ocp, expect_response=False)
+                    pipeline.execute(SupplyCommand.OCP_ENABLE, expect_response=False)
+                    print(f"  OCP {ocp}A olarak ayarlandı ve aktif edildi.")
+                except ValueError:
+                    print("  Geçersiz değer.")
+            elif ocp_secim == "2":
+                pipeline.execute(SupplyCommand.OCP_DISABLE, expect_response=False)
+                print("  OCP kapatıldı.")
+            else:
+                print("  Geçersiz seçim.")
+
+        elif secim == "4":
+            # Sayfa 77 - OUTP ON: Üç çıkışı birden aktif eder.
+            pipeline.execute(SupplyCommand.OPEN_OUTPUT, expect_response=False)
+            print("  Çıkış açıldı (OUTP ON).")
+            v = pipeline.execute(SupplyCommand.MEASURE_VOLTAGE, expect_response=True)
+            c = pipeline.execute(SupplyCommand.MEASURE_CURRENT, expect_response=True)
+            print(f"  Ölçüm -> Voltaj: {v} V, Akım: {c} A")
+
+        elif secim == "5":
+            # Sayfa 77 - OUTP OFF: Üç çıkışı birden kapatır.
+            pipeline.execute(SupplyCommand.CLOSE_OUTPUT, expect_response=False)
+            print("  Çıkış kapatıldı (OUTP OFF).")
+
+        elif secim == "6":
+            # Sayfa 76 - MEAS:VOLT? / MEAS:CURR?: Seçili kanalın gerçek
+            # çıkış voltajını ve akımını ölçer.
+            v = pipeline.execute(SupplyCommand.MEASURE_VOLTAGE, expect_response=True)
+            c = pipeline.execute(SupplyCommand.MEASURE_CURRENT, expect_response=True)
+            print(f"  Ölçüm -> Voltaj: {v} V, Akım: {c} A")
+
+        elif secim == "7":
+            # Sayfa 82 - SYST:ERR?: Hata kuyruğundaki son hatayı döner.
+            # Hata yoksa "+0, No error" döner.
+            err = pipeline.execute(SupplyCommand.SYSTEM_ERROR, expect_response=True)
+            print(f"  Hata durumu: {err}")
+
+        elif secim == "8":
+              # Sayfa 82 - *RST: Cihazı fabrika varsayılanlarına sıfırlar.
+              # Tüm çıkışlar 0V, akım limitleri default (P6V=5A, ±25V=1A),
+              # output OFF, tracking OFF. Kanal P6V'ye döner.
+              pipeline.execute(SupplyCommand.RESET, expect_response=False)
+              aktif_kanal = "P6V"
+              ocp_esik = None
+              print("  Cihaz sıfırlandı (*RST). Kanal P6V'ye döndü, OCP sıfırlandı.")
+
+        elif secim == "0":
+            # Güvenli kapanış:
+            # Sayfa 77 - OUTP OFF: Çıkışları kapat
+            # Sayfa 87 - SYST:LOC: Cihazı local moda döndürür, ön panel aktif olur
+            pipeline.execute(SupplyCommand.CLOSE_OUTPUT, expect_response=False)
+            pipeline.execute(SupplyCommand.SYSTEM_LOCAL, expect_response=False)
+            if panel_kilitli:
+                print("\nÖn panel kilidi açıldı (SYST:LOC).")
+            print("Çıkışlar kapatıldı, cihaz local moda döndü. Güle güle!")
+            break
+
+        else:
+            print("  Geçersiz seçim, tekrar deneyin.")
 
 
 def main() -> int:
